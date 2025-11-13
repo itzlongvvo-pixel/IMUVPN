@@ -9,13 +9,14 @@ import stripe
 # --- Stripe setup ---
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
-# DEBUG: check if key loaded from environment
+# Optional debug - keep for now, remove later if you want
 if not stripe.api_key:
     print("DEBUG: STRIPE_SECRET_KEY is MISSING or EMPTY in environment")
 else:
     print("DEBUG: Stripe key loaded, length:", len(stripe.api_key))
 
-app = FastAPI(title="imuVPN API", version="0.1.0")
+# --- App setup ---
+app = FastAPI(title="imuVPN API", version="0.2.0")
 
 # CORS: open during dev; lock down later to your Netlify domain
 app.add_middleware(
@@ -26,10 +27,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory stores (demo only)
-USERS: Dict[str, Dict] = {}
-SESSIONS: Dict[str, Dict] = {}
-CONFIGS: Dict[str, List[Dict]] = {}
+# --- In-memory stores (demo only) ---
+USERS: Dict[str, Dict] = {}      # email -> {"password": ..., "active": bool}
+SESSIONS: Dict[str, Dict] = {}   # token -> {"email": ...}
+CONFIGS: Dict[str, List[Dict]] = {}  # email -> [ {name, location, config} ]
+
+
+# --- Models ---
 
 
 class SignupBody(BaseModel):
@@ -51,15 +55,34 @@ class CheckoutBody(BaseModel):
     priceId: str  # "price_monthly" | "price_yearly" | "price_family"
 
 
+class AdminOverview(BaseModel):
+    total_users: int
+    active_sessions: int
+    total_devices: int
+
+
+# --- Auth dependency ---
+
+
 def auth(authorization: Optional[str] = Header(None)):
+    """
+    Simple token-based auth using SESSIONS dict.
+    In prod you'd use JWT + a real DB.
+    """
     if not authorization or authorization not in SESSIONS:
         raise HTTPException(401, "unauthorized")
     return SESSIONS[authorization]
 
 
+# --- Health ---
+
+
 @app.get("/")
 def root():
-    return {"ok": True, "service": "imuVPN API"}
+    return {"ok": True, "service": "imuVPN API", "version": "0.2.0"}
+
+
+# --- Auth routes ---
 
 
 @app.post("/auth/signup")
@@ -80,8 +103,22 @@ def login(body: LoginBody):
     return {"token": token}
 
 
+@app.get("/auth/me")
+def me(user=Depends(auth)):
+    email = user["email"]
+    data = USERS.get(email, {})
+    return {"email": email, "active": data.get("active", False)}
+
+
+# --- WireGuard config routes (still mock, but structured) ---
+
+
 @app.post("/wireguard/configs")
 def create_config(body: CreateConfigBody, user=Depends(auth)):
+    """
+    For now this generates a fake WireGuard config.
+    Later we will call real VPN servers here.
+    """
     private_key = secrets.token_hex(16)
     public_key = secrets.token_hex(16)
     peer_ip = f"10.8.{secrets.randbelow(200)}.{secrets.randbelow(200)}/32"
@@ -116,6 +153,7 @@ def list_configs(user=Depends(auth)):
 
 # --- Stripe Checkout mapping ---
 
+
 PRICE_LOOKUP = {
     "price_monthly": "price_1ST0aPA2orsFpuy3FeqNH1Ti",   # Monthly
     "price_yearly":  "price_1ST0bbA2orsFpuy3yg1VLRLX",   # Yearly
@@ -144,3 +182,29 @@ def checkout(body: CheckoutBody, user=Depends(auth)):
         raise HTTPException(500, f"stripe_error: {e}")
 
     return {"url": session.url}
+
+
+# --- Founder / Admin endpoints ---
+
+
+def require_admin(x_admin_key: Optional[str] = Header(None)) -> None:
+    """
+    Very simple admin gate using a header.
+    In Render, set FOUNDER_API_KEY to a long random string.
+    Frontend will send it only from your private founder page.
+    """
+    expected = os.environ.get("FOUNDER_API_KEY")
+    if not expected or x_admin_key != expected:
+        raise HTTPException(401, "admin_unauthorized")
+
+
+@app.get("/admin/overview", response_model=AdminOverview)
+def admin_overview(_=Depends(require_admin)):
+    total_users = len(USERS)
+    active_sessions = len(SESSIONS)
+    total_devices = sum(len(v) for v in CONFIGS.values())
+    return AdminOverview(
+        total_users=total_users,
+        active_sessions=active_sessions,
+        total_devices=total_devices,
+    )
