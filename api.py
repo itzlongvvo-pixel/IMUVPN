@@ -6,7 +6,7 @@ import secrets
 import os
 import stripe
 
-# Configure Stripe (secret key comes from environment variable on Render)
+# --- Stripe setup ---
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
 app = FastAPI(title="imuVPN API", version="0.1.0")
@@ -20,7 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory stores (demo only; replace with real DB later)
+# In-memory stores (demo only)
 USERS: Dict[str, Dict] = {}
 SESSIONS: Dict[str, Dict] = {}
 CONFIGS: Dict[str, List[Dict]] = {}
@@ -42,12 +42,10 @@ class CreateConfigBody(BaseModel):
 
 
 class CheckoutBody(BaseModel):
-    # One of: "price_monthly", "price_yearly", "price_family"
-    priceId: str
+    priceId: str  # "price_monthly" | "price_yearly" | "price_family"
 
 
 def auth(authorization: Optional[str] = Header(None)):
-    """Simple token auth using in-memory SESSIONS."""
     if not authorization or authorization not in SESSIONS:
         raise HTTPException(401, "unauthorized")
     return SESSIONS[authorization]
@@ -110,7 +108,7 @@ def list_configs(user=Depends(auth)):
     return CONFIGS.get(user["email"], [])
 
 
-# === Stripe Checkout ===
+# --- Stripe Checkout mapping ---
 
 PRICE_LOOKUP = {
     "price_monthly": "price_1ST0aPA2orsFpuy3FeqNH1Ti",   # Monthly
