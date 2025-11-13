@@ -9,6 +9,12 @@ import stripe
 # --- Stripe setup ---
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
+# DEBUG: check if key loaded from environment
+if not stripe.api_key:
+    print("DEBUG: STRIPE_SECRET_KEY is MISSING or EMPTY in environment")
+else:
+    print("DEBUG: Stripe key loaded, length:", len(stripe.api_key))
+
 app = FastAPI(title="imuVPN API", version="0.1.0")
 
 # CORS: open during dev; lock down later to your Netlify domain
