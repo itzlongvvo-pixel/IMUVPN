@@ -1,3 +1,4 @@
 fastapi==0.115.5
 uvicorn==0.32.0
 python-multipart==0.0.9
+stripe==10.9.0
